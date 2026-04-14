@@ -1,62 +1,142 @@
-﻿Dictionary<double, double> OriginalGraph = new Dictionary<double, double>();
+﻿using ScottPlot;
+
+Dictionary<double, double> OriginalGraph = new Dictionary<double, double>();
+
+var randFunction = new Random(12);
 
 for (int i = 0; i <= 30; i++)
-    OriginalGraph.Add(i, function(i));
+    OriginalGraph.Add(i, randFunction.Next(5, 15));
 
-Dictionary<double, double> Columns = new Dictionary<double, double>();
+Dictionary<double, double> TheoreticalGraph = new Dictionary<double, double>();
 
 for (int i = 8; i <= 24; i++)
-    Columns.Add(i, OriginalGraph[i]);
-
-Dictionary<double, List<double>> Probabilitis = new Dictionary<double, List<double>>();
-
-foreach (double height in Columns.Values)
 {
-    var probability = height / Columns.Values.Sum();
-    Probabilitis[probability] = new List<double>();
+    if (i % 2 != 0)
+        TheoreticalGraph.Add(i, OriginalGraph[i]);
 }
 
-Random random = new Random(7);
+List<double> columnKeys = TheoreticalGraph.Keys.ToList();
+List<double> theoreticalHeights = TheoreticalGraph.Values.ToList();
+double totalTheoreticalHeight = theoreticalHeights.Sum();
 
-Dictionary<double, double> Vs = new Dictionary<double, double>();
+List<double> theoreticalProbabilities = new List<double>();
+List<double> cumulativeProbabilities = new List<double>();
+double cumulative = 0;
+
+for (int i = 0; i < theoreticalHeights.Count; i++)
+{
+    double prob = theoreticalHeights[i] / totalTheoreticalHeight;
+    theoreticalProbabilities.Add(prob);
+    cumulative += prob;
+    cumulativeProbabilities.Add(cumulative);
+}
+
+cumulativeProbabilities[cumulativeProbabilities.Count - 1] = 1.0;
+
+Dictionary<double, int> experimentalCounts = new Dictionary<double, int>();
+
+for (int i = 0; i < columnKeys.Count; i++)
+    experimentalCounts[columnKeys[i]] = 0;
+
+Random random = new Random(2);
 List<double> mediums = new List<double>();
 double sum = 0;
+int totalSamples = 1000;
 
-for (int i = 0; i < 1000; i++)
+for (int i = 0; i < totalSamples; i++)
 {
-    var randomNumber = random.NextDouble();
+    double randomNumber = random.NextDouble();
     sum += randomNumber;
+    mediums.Add(sum / (i + 1));
 
-    var targetRange = Probabilitis.First(kvp => randomNumber <= kvp.Key);
-    var targetProbability = targetRange.Key;
-    var targetList = targetRange.Value;
+    for (int j = 0; j < cumulativeProbabilities.Count; j++)
+    {
+        if (randomNumber <= cumulativeProbabilities[j])
+        {
+            experimentalCounts[columnKeys[j]]++;
+            break;
+        }
+    }
+}
 
-    targetList.Add(randomNumber);
+Dictionary<double, double> experimentalProbabilities = new Dictionary<double, double>();
 
-    mediums.Add(randomNumber / sum);
+for (int i = 0; i < columnKeys.Count; i++)
+    experimentalProbabilities[columnKeys[i]] = experimentalCounts[columnKeys[i]] / (double)totalSamples;
 
-    if (!Vs.ContainsKey(targetProbability))
-        Vs[targetProbability] = 1;
+Dictionary<double, double> AdjustedGraph = new Dictionary<double, double>();
+
+for (int i = 0; i < columnKeys.Count; i++)
+{
+    double key = columnKeys[i];
+    double theoreticalProb = theoreticalProbabilities[i];
+    double experimentalProb = experimentalProbabilities[key];
+
+    if (experimentalProb > 0)
+        AdjustedGraph[key] = theoreticalHeights[i] * (theoreticalProb / experimentalProb);
     else
-        Vs[targetProbability]++;
+        AdjustedGraph[key] = 0;
 }
 
-double vSum = Vs.Values.Sum();
+var plt = new Plot();
 
-foreach(var pair in new(Vs))
+var originalSignal = plt.Add.SignalXY(OriginalGraph.Keys.ToArray(), OriginalGraph.Values.ToArray());
+originalSignal.Color = Colors.Grey.WithAlpha(0.7);
+originalSignal.LineWidth = 1;
+originalSignal.LegendText = "Основной граф";
+
+var theoreticalBars = plt.Add.Bars(values: TheoreticalGraph.Values, positions: TheoreticalGraph.Keys);
+
+foreach (var bar in theoreticalBars.Bars)
 {
-    var trueV = pair.Value / vSum;
-    
-    Vs[pair.Key] = true;
+    bar.Size = 2d;
+    bar.FillColor = Colors.Blue.WithAlpha(1);
 }
 
-Dictionary<double, double> NewGraph = new Dictionary<double, double>();
-
-for (int i = 8; i <= 24; i++)
+var adjustedBars = plt.Add.Bars(values: AdjustedGraph.Values, positions: AdjustedGraph.Keys);
+foreach (var bar in adjustedBars.Bars)
 {
-    var height = OriginalGraph[i] * Vs[i] / Probabilitis[i];
-    NewGraph[i] = height;
+    bar.Size = 2d;
+    bar.FillColor = Colors.Red.WithAlpha(1);
 }
 
-double function(double x) => Math.Abs(Math.Sin(x) * Math.Exp(Math.Cos(x))) * Math.Pow(Math.Tan(x * x -3), -1) 
-* Math.Sin(5 * x) * Math.Sign(x - Math.PI);
+var theoreticalScatter = plt.Add.SignalXY(TheoreticalGraph.Keys.ToArray(), TheoreticalGraph.Values.ToArray());
+theoreticalScatter.Color = Colors.Blue;
+theoreticalScatter.LineWidth = 2;
+theoreticalScatter.LegendText = "Теоретический граф";
+
+var adjustedScatter = plt.Add.SignalXY(AdjustedGraph.Keys.ToArray(), AdjustedGraph.Values.ToArray());
+adjustedScatter.Color = Colors.Red;
+adjustedScatter.LineWidth = 2;
+adjustedScatter.LegendText = "Экспериментальный граф";
+
+plt.Axes.SetLimitsX(8, 24);
+plt.XLabel("Величина X");
+plt.YLabel("Высота");
+plt.Legend.IsVisible = true;
+plt.SaveSvg("Test.svg", 800, 1000);
+
+
+var newPlt = new Plot();
+double[] x = Enumerable.Range(0, mediums.Count).Select(i => (double)i).ToArray();
+double[] y = mediums.ToArray();
+
+newPlt.Axes.Left.TickGenerator = new ScottPlot.TickGenerators.NumericFixedInterval(0.05);
+
+newPlt.Add.Scatter(x, y);
+newPlt.Title("Сходимость");
+newPlt.YLabel("Среднее");
+newPlt.XLabel("Число итераций");
+newPlt.Add.HorizontalLine(0.45, color: Colors.Red);
+newPlt.Add.HorizontalLine(0.55, color: Colors.Red);
+newPlt.SaveSvg("Rng.svg", 800, 1000);
+
+Console.WriteLine("Итоги");
+double totalError = 0;
+for (int i = 0; i < columnKeys.Count; i++)
+{
+    double error = Math.Abs(theoreticalHeights[i] - AdjustedGraph[columnKeys[i]]);
+    totalError += error;
+    Console.WriteLine($"Ключ {columnKeys[i]}: Ошибка = {error:F2}");
+}
+Console.WriteLine($"Суммарная ошибка: {totalError:F2}");
